@@ -1,0 +1,103 @@
+// UART handle structure
+UART_HandleTypeDef huart2;
+
+// ADC handle structure
+ADC_HandleTypeDef hadc1;
+ADC_HandleTypeDef hadc2;
+
+// Variables for sensor readings
+float airPressureValue = 0;
+float temperatureValue = 0;
+
+// Queue handle for sensor data
+QueueHandle_t sensorDataQueue;
+
+void SensorTask(void *pvParameters);
+void DisplayTask(void *pvParameters);
+
+int main() {
+  sensorDataQueue =
+      xQueueCreate(10, sizeof(float));  // Queue size and item size
+
+  // Create tasks for sensor reading and OLED display
+  xTaskCreate(SensorTask, "SensorTask", 128, NULL, 1, NULL);
+  xTaskCreate(DisplayTask, "DisplayTask", 128, NULL, 2, NULL);
+
+  // Start the FreeRTOS scheduler
+  vTaskStartScheduler();
+
+  while (1) {
+    // This point will never be reached
+  }
+}
+
+// Task to read sensor data and send it to the queue
+void SensorTask(void *pvParameters) {
+  (void)pvParameters;  // Unused parameter
+
+  while (1) {
+    // Start the ADC conversion for air pressure sensor
+    HAL_ADC_Start(&hadc1);
+
+    // Wait for the conversion to complete
+    if (HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY) == HAL_OK) {
+      // Read the air pressure sensor value
+      uint16_t airPressureSensorValue = HAL_ADC_GetValue(&hadc1);
+
+      // Convert the air pressure sensor value to the desired units
+      airPressureValue = (float)airPressureSensorValue * 3.3f /
+                         4095.0f;  // Example conversion for air pressure
+
+      // Send air pressure sensor data to the queue
+      xQueueSend(sensorDataQueue, &airPressureValue, portMAX_DELAY);
+    }
+
+    // Start the ADC conversion for temperature sensor
+    HAL_ADC_Start(&hadc2);
+
+    // Wait for the conversion to complete
+    if (HAL_ADC_PollForConversion(&hadc2, HAL_MAX_DELAY) == HAL_OK) {
+      // Read the temperature sensor value
+      uint16_t temperatureSensorValue = HAL_ADC_GetValue(&hadc2);
+
+      // Convert the temperature sensor value to the desired units
+      temperatureValue = (float)temperatureSensorValue * 100.0f /
+                         4095.0f;  // Example conversion for temperature
+
+      // Send temperature sensor data to the queue
+      xQueueSend(sensorDataQueue, &temperatureValue, portMAX_DELAY);
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(1000));  // Delay for 1 second
+  }
+}
+
+// Task to display sensor data on UART
+void DisplayTask(void *pvParameters) {
+  (void)pvParameters;  // Unused parameter
+
+  float airPressureSensorData = 0.0f;
+  float temperatureSensorData = 0.0f;
+
+  while (1) {
+    // Receive air pressure sensor data from the queue
+    if (xQueueReceive(sensorDataQueue, &airPressureSensorData, portMAX_DELAY)) {
+      // Print air pressure sensor data via UART
+      char airPressureBuffer[64];
+      snprintf(airPressureBuffer, sizeof(airPressureBuffer),
+               "Air Pressure: %.2f Pa\r\n", airPressureSensorData);
+      HAL_UART_Transmit(&huart2, (uint8_t *)airPressureBuffer,
+                        strlen(airPressureBuffer), HAL_MAX_DELAY);
+    }
+
+    // Receive temperature sensor data from the queue
+    if (xQueueReceive(sensorDataQueue, &temperatureSensorData, portMAX_DELAY)) {
+      // Print temperature sensor data via UART
+      char temperatureBuffer[64];
+      snprintf(temperatureBuffer, sizeof(temperatureBuffer),
+               "Temperature: %.2f °C\r\n", temperatureSensorData);
+      HAL_UART_Transmit(&huart2, (uint8_t *)temperatureBuffer,
+                        strlen(temperatureBuffer), HAL_MAX_DELAY);
+    }
+  }
+}
